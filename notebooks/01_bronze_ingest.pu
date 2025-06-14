@@ -1,0 +1,43 @@
+# Databricks notebook or local PySpark script
+from pyspark.sql import SparkSession
+from pyspark.sql.types import StructType, StructField, StringType, DoubleType, TimestampType
+from pyspark.sql.functions import current_timestamp
+
+# Initialize Spark session
+spark = SparkSession.builder.appName("BronzeLayerIngest").getOrCreate()
+
+# Define schema for telemetry data
+telemetry_schema = StructType([
+    StructField("device_id", StringType(), True),
+    StructField("temperature", DoubleType(), True),
+    StructField("vibration", DoubleType(), True),
+    StructField("pressure", DoubleType(), True),
+    StructField("timestamp", TimestampType(), True)
+])
+
+# Read data from local CSV or dbfs path (adjust as needed)
+input_path = "dbfs:/mnt/iot-data/raw/telemetry.csv"  # or "file:/Workspace/path/to/telemetry.csv"
+df_raw = spark.read.format("csv") \
+    .option("header", "true") \
+    .schema(telemetry_schema) \
+    .load(input_path)
+
+# Add metadata columns (e.g., ingestion time)
+df_bronze = df_raw.withColumn("ingestion_time", current_timestamp())
+
+# Write to Bronze Delta table
+output_path = "dbfs:/mnt/iot-data/bronze/telemetry"
+df_bronze.write.format("delta") \
+    .mode("overwrite") \
+    .option("overwriteSchema", "true") \
+    .save(output_path)
+
+# Optionally register as a table
+spark.sql("CREATE DATABASE IF NOT EXISTS iot_bronze")
+spark.sql(f"""
+    CREATE TABLE IF NOT EXISTS iot_bronze.telemetry_raw
+    USING DELTA
+    LOCATION '{output_path}'
+""")
+
+print("✅ Bronze telemetry data ingested.")
